@@ -1,0 +1,6 @@
+{"impl":"node","mode":"probe","ready_unix_ns":1794509936409418892,"scenario":"startup","startup_ms":226.955}
+{"impl":"go","mode":"probe","ready_unix_ns":1794509958598675794,"scenario":"startup","startup_ms":113.659}
+{"impl":"node","mode":"probe","ready_unix_ns":1794509980899019984,"scenario":"startup","startup_ms":247.116}
+{"impl":"go","mode":"probe","ready_unix_ns":1794510003150114356,"scenario":"startup","startup_ms":132.213}
+{"impl":"node","mode":"probe","ready_unix_ns":1794510025464108067,"scenario":"startup","startup_ms":202.493}
+{"impl":"go","mode":"probe","ready_unix_ns":1794510047654648222,"scenario":"startup","startup_ms":110.508}

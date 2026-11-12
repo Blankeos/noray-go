@@ -1,0 +1,6 @@
+{"cpu_pct":1.4055475100685813,"impl":"node","mem_bytes":19562496,"mode":"idle","scenario":"idle-default-config"}
+{"cpu_pct":0,"impl":"go","mem_bytes":13000704,"mode":"idle","scenario":"idle-default-config"}
+{"cpu_pct":1.0429887440699548,"impl":"node","mem_bytes":18866176,"mode":"idle","scenario":"idle-default-config"}
+{"cpu_pct":0,"impl":"go","mem_bytes":10674176,"mode":"idle","scenario":"idle-default-config"}
+{"cpu_pct":1.2646577392636253,"impl":"node","mem_bytes":19873792,"mode":"idle","scenario":"idle-default-config"}
+{"cpu_pct":0,"impl":"go","mem_bytes":10756096,"mode":"idle","scenario":"idle-default-config"}

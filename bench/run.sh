@@ -145,5 +145,5 @@ case $WHAT in
   *) $WHAT ;;
 esac
 srv_rm
-docker run --rm -v "$PWD/$OUT":/r noray-loadgen:bench report $(cd $OUT && ls *.jsonl | sed 's#^#/r/#') >"$OUT/summary.md"
+docker run --rm -v "$PWD/$OUT":/r noray-loadgen:bench report $(cd "$OUT" && ls *.jsonl | sed "s#^#/r/#") >"$OUT/summary.md"
 cat "$OUT/summary.md"

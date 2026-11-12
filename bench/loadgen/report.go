@@ -27,6 +27,9 @@ func report(files []string) error {
 			if json.Unmarshal(sc.Bytes(), &v) != nil {
 				continue
 			}
+			if v["mode"] == "image" {
+				continue
+			}
 			s, _ := v["scenario"].(string)
 			if rate, ok := v["rate_hz"].(float64); ok && strings.Contains(s, "sweep") {
 				s = fmt.Sprintf("%s@%.0fHz", s, rate)
