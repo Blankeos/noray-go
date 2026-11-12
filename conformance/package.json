@@ -1,0 +1,9 @@
+{
+  "name": "noray-conformance",
+  "private": true,
+  "type": "module",
+  "description": "Black-box Noray conformance suite (ported from foxssake/noray test/e2e). Node builtins only.",
+  "scripts": {
+    "test": "node --test --test-concurrency=1 --test-reporter=spec *.test.mjs"
+  }
+}

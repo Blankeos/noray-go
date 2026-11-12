@@ -1,0 +1,5 @@
+/bin/
+/.work/
+/bench/loadgen/loadgen
+node_modules/
+.env
