@@ -1,20 +1,60 @@
 # noray-go
 
-A Go drop-in replacement for [Noray](https://github.com/foxssake/noray), the NAT punch-through orchestrator and UDP relay for online games (used by netfox and Godot games). Same TCP commands, same UDP registrar and relays, same `NORAY_*` config, same Prometheus metrics, in a 6 MB static binary that doesn't crash when a relay goes over its bandwidth limit.
+> [!NOTE]
+> **This is a Go port of [Noray](https://github.com/foxssake/noray) by [Tamás Gálffy / foxssake](https://github.com/foxssake).**
+> The protocol, behaviour, word list and tests all come from the original (MIT). noray-go is a drop-in replacement: same TCP commands, same UDP registrar and relays, same `NORAY_*` config, same Prometheus metrics. It passes the original's own end-to-end tests, and it is smaller and faster (see [Performance](#-performance)) and doesn't crash when a relay goes over its bandwidth limit.
 
-## ✨ What it does
+A simple connection orchestrator and relay to bulletproof connectivity for your online multiplayer games, as a 6 MB static binary.
 
-- **TCP 8890**: `register-host` -> `set-oid <oid>` + `set-pid <pid>`; `connect <oid>` swaps both parties' public UDP addresses (hole punching); `connect-relay <oid>` returns relay ports when punching fails.
-- **UDP 8809**: send your pid, get `OK`; Noray now knows your public address.
-- **UDP 49152-51200**: one relay port per party, with per-relay and global bandwidth limits, lifetime limits, idle cleanup and dynamic relaying.
-- **HTTP 8891** `/metrics`: the original's `noray_*` metrics.
+## ✨ Highlights
 
-The full wire behaviour, quirks included, is in [docs/protocol.md](docs/protocol.md). What changed and why: [docs/adr/0001-go-rewrite.md](docs/adr/0001-go-rewrite.md).
+| | Node original | noray-go |
+|---|---|---|
+| Docker image | 320 MB | **6.1 MB** |
+| Idle memory | 18.7 MiB | **10.3 MiB** |
+| 20 000 held hosts | 84.8 MiB | **46.6 MiB** |
+| Relay capacity (≤ 1% loss) | about 60k packets/s | **about 280k packets/s** |
+| 500 rooms x 6 players @ 30 Hz | 74% packet loss | **0% loss** |
+| Relay over its bandwidth limit | process crashes | **drops the packets, keeps running** |
 
-## 🚀 Quick start
+## 🧭 Why orchestration
+
+If you're already familiar with the topic, noray can help with NAT punchthrough.
+
+If you're not familiar with the issue, read Keith Johnston's [article](https://keithjohnston.wordpress.com/2014/02/17/nat-punch-through-for-multiplayer-games/) on the topic. In short:
+
+* Most PCs online are behind a router
+* Routers only allow traffic to your PC if it's in response to something you sent
+* So if you host an online game, people won't be able to connect to your PC
+* NAT punchthrough is both parties sending traffic to each other: the first packets fail, the next ones succeed because each router now sees outgoing traffic
+
+*noray* helps by orchestrating the NAT punchthrough process 🔥
+
+## 🔁 Why relaying
+
+Even NAT punchthrough is not always viable, depending on your players' NAT setup. To make sure players can always connect, *noray* can act as a relay 🔥
+
+*noray* dedicates a specific UDP port to each player, at which others can send data to them. Any data incoming on this dedicated port is transmitted as-is to the appropriate player.
+
+*NOTE:* Relaying only supports UDP traffic.
+
+## 📦 Dependencies
+
+* [Go](https://go.dev/dl/) 1.26 or newer, to build from source
+* Or just Docker: the image has no runtime dependencies (`FROM scratch`)
+
+## 🛠️ Installation
 
 ```sh
-make build && ./bin/noray          # or: go run ./cmd/noray
+git clone https://github.com/Blankeos/noray-go
+cd noray-go
+make build          # ./bin/noray
+```
+
+## ▶️ Usage
+
+```sh
+./bin/noray         # or: go run ./cmd/noray
 ```
 
 ```sh
@@ -22,6 +62,15 @@ printf 'register-host\n' | nc -w1 localhost 8890
 # set-oid TWmoTe-qqbUShZcU8Qlrx
 # set-pid 2x0GPldCX...
 ```
+
+Upon startup the application allocates all the configured ports and starts listening. Logs are written to stdout as pino-style JSON lines. `SIGTERM` and `SIGINT` shut down gracefully.
+
+Ports (all configurable):
+
+* TCP **8890** for clients to register and request connections
+* UDP **8809** for the remote address registrar
+* UDP **49152-51200** for relays (make sure Docker maps the same range)
+* HTTP **8891** for Prometheus metrics at `/metrics`
 
 ## ⚙️ Configuration
 
@@ -47,7 +96,7 @@ Environment variables (or a `.env` in the working directory), identical to the o
 
 Sizes are bytes in powers of 1024 (`1Gb` = 1 GiB of bytes, not a gigabit); durations take `us ms s m h hr d w mo yr`. Logs are pino-style JSON lines on stdout.
 
-## 🐳 Docker
+### 🐳 Usage with Docker
 
 ```sh
 docker build --load -t noray-go .
@@ -56,6 +105,48 @@ docker run --rm -p 8890:8890 -p 8809:8809/udp -p 8891:8891 \
 ```
 
 Multi-stage build, `CGO_ENABLED=0`, final image `FROM scratch`, runs as nobody. `SIGTERM` and `SIGINT` shut down gracefully.
+
+## 📖 Documentation
+
+The full wire behaviour, quirks included, is in [docs/protocol.md](docs/protocol.md). What changed from the original and why: [docs/adr/0001-go-rewrite.md](docs/adr/0001-go-rewrite.md).
+
+### Protocol
+
+Data is transmitted over TCP as newline-separated strings. Each line starts with a command, a space, and the rest of the line is data. Example:
+
+```
+connect-relay host-1
+```
+
+The protocol has no concept of replies, threads or correspondences. Think of it as a dumbed-down RPC without return values.
+
+### Flows
+
+#### Host registration
+
+Each player first registers as a host (clients too) by sending `register-host` over TCP. *noray* replies with the host's OpenID and PrivateID:
+
+```
+set-oid [openid]
+set-pid [privateid]
+```
+
+These IDs are needed for any later exchange. Don't forget to end your messages with a newline!
+
+#### Remote address registration
+
+To orchestrate connections, *noray* needs each host's external address. Create a UDP socket and send the host's PrivateID to the registrar port. This is idempotent: send multiple packets until you get a reply. On success the reply is `OK`, otherwise an error message.
+
+#### Connecting
+
+Connecting can be attempted via NAT punchthrough or relay. Since the relay ports are limited, prefer punchthrough whenever possible. You need the target host's OpenID (sharing it is up to you), then send one of:
+
+```
+connect [openid]
+connect-relay [openid]
+```
+
+The server replies with the same command: the target address and port for punchthrough (`connect 87.53.78.15:55759`), or the relay port on the *noray* server itself (`connect-relay 49178`). Both parties receive the appropriate command, and should then attempt a UDP handshake with each other.
 
 ## 🧪 Tests
 
@@ -75,7 +166,7 @@ Results (2026-11-13):
 | Hooked's Godot client (`tests/net_test.tscn`): hole punch, forced relay, each at 0 ms and at 150 ms ping + 2% loss | 4/4 pass | 4/4 pass |
 | `docker stop` | ignores SIGTERM, killed after 10 s | exits 0 in 0.2 s |
 
-## 📊 Benchmarks
+## 📊 Performance
 
 Original 1.5.1 on Node 22 vs noray-go, each in a local container limited to **1 CPU and 256 MB**, same config, load from a Go load generator in another container speaking the real protocol (rooms of 1 host + 5 clients, 60-200 byte packets both ways). Medians of 3 runs; method in [docs/adr/0003-benchmark-method.md](docs/adr/0003-benchmark-method.md), every run in [bench/results/](bench/results/summary.md). Relay limits were raised so they never interfere, except in the last row.
 
@@ -101,6 +192,6 @@ Run it yourself (builds images locally, never pushes):
 NORAY_NODE_SRC=/path/to/foxssake/noray make bench   # ~45 min
 ```
 
-## 📜 License and credit
+## 📜 License
 
-MIT, like the original. Noray is by Tamás Gálffy ([foxssake/noray](https://github.com/foxssake/noray)); the protocol, behaviour, word list and tests this port follows are his. See [LICENSE](LICENSE).
+*noray-go* is licensed under the [MIT license](LICENSE), like the original. Noray is by Tamás Gálffy ([foxssake/noray](https://github.com/foxssake/noray)); the protocol, behaviour, word list and tests this port follows are his. Also see [netfox](https://github.com/foxssake/netfox), the Godot addon collection that uses noray.
