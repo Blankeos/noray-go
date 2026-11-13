@@ -352,6 +352,72 @@ func TestRelayHotPathAllocations(t *testing.T) {
 	}
 }
 
+// --- wait for peer (new) ---
+
+// The first side to send is held until the other side has sent to its relay
+// port; then traffic flows both ways. Each NAT sees its own packet first.
+func TestWaitForPeer(t *testing.T) {
+	h := newHandler(t, 2)
+	h.EnableWaitForPeer()
+	host, client := udp(t), udp(t)
+	hostRelay, _, _ := h.CreateRelay(addrOf(host))
+	clientRelay, _, _ := h.CreateRelay(addrOf(client))
+	to := func(port int) netip.AddrPort {
+		return netip.AddrPortFrom(netip.MustParseAddr("127.0.0.1"), uint16(port))
+	}
+
+	// the host punches first: held, the client hears nothing
+	host.WriteToUDPAddrPort([]byte("punch"), to(clientRelay.Port))
+	host.WriteToUDPAddrPort([]byte("punch"), to(clientRelay.Port))
+	client.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+	if n, _, err := client.ReadFromUDPAddrPort(make([]byte, 64)); err == nil {
+		t.Fatalf("the client got %d bytes before it sent anything", n)
+	}
+	if h.m.Held.Value() != 2 {
+		t.Fatalf("held %d", h.m.Held.Value())
+	}
+	// the client's first packet goes through: the host has sent to the client's relay
+	client.WriteToUDPAddrPort([]byte("connect"), to(hostRelay.Port))
+	if msg, from := recv(t, host); msg != "connect" || int(from.Port()) != clientRelay.Port {
+		t.Fatalf("host got %q from %v", msg, from)
+	}
+	// and now the host reaches the client
+	host.WriteToUDPAddrPort([]byte("verify"), to(clientRelay.Port))
+	if msg, from := recv(t, client); msg != "verify" || int(from.Port()) != hostRelay.Port {
+		t.Fatalf("client got %q from %v", msg, from)
+	}
+	if h.m.Held.Value() != 2 {
+		t.Fatalf("held %d", h.m.Held.Value())
+	}
+}
+
+// Off by default: the first packet is relayed at once, like the original.
+func TestWaitForPeerOffByDefault(t *testing.T) {
+	h := newHandler(t, 2)
+	sender, receiver := udp(t), udp(t)
+	h.CreateRelay(addrOf(sender))
+	r, _, _ := h.CreateRelay(addrOf(receiver))
+	if !h.Relay([]byte("x"), addrOf(sender), r.Port) || h.m.Held.Value() != 0 {
+		t.Fatal("the first packet should be relayed")
+	}
+}
+
+func TestWaitForPeerHotPathAllocations(t *testing.T) {
+	h := newHandler(t, 2)
+	h.EnableWaitForPeer()
+	sender, receiver := udp(t), udp(t)
+	s, _, _ := h.CreateRelay(addrOf(sender))
+	r, _, _ := h.CreateRelay(addrOf(receiver))
+	h.Relay([]byte("open"), addrOf(receiver), s.Port)
+	msg := make([]byte, 120)
+	from := addrOf(sender)
+	h.Relay(msg, from, r.Port)
+	allocs := testing.AllocsPerRun(200, func() { h.Relay(msg, from, r.Port) })
+	if allocs != 0 {
+		t.Fatalf("Relay allocates %v per packet", allocs)
+	}
+}
+
 // --- udp.relay.cleanup.test.mjs ---
 
 func TestCleanup(t *testing.T) {

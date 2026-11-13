@@ -6,6 +6,7 @@ package relay
 import (
 	"net/netip"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -34,6 +35,30 @@ type Entry struct {
 	sock    *Socket
 	limiter atomic.Pointer[BandwidthLimiter] // per-relay bandwidth constraint
 	traffic atomic.Int64                     // lifetime traffic constraint
+
+	// sentTo holds the relay ports this address has sent to (WaitForPeer).
+	sentMu sync.Mutex
+	sentTo map[int]struct{}
+}
+
+// markSentTo records that this address sent to relay port p.
+func (e *Entry) markSentTo(p int) {
+	e.sentMu.Lock()
+	if _, ok := e.sentTo[p]; !ok {
+		if e.sentTo == nil {
+			e.sentTo = map[int]struct{}{}
+		}
+		e.sentTo[p] = struct{}{}
+	}
+	e.sentMu.Unlock()
+}
+
+// hasSentTo reports whether this address has sent to relay port p.
+func (e *Entry) hasSentTo(p int) bool {
+	e.sentMu.Lock()
+	_, ok := e.sentTo[p]
+	e.sentMu.Unlock()
+	return ok
 }
 
 // NewEntry creates an entry (used by tests and the handler).

@@ -92,7 +92,10 @@ Environment variables (or a `.env` in the working directory), identical to the o
 | `NORAY_UDP_RELAY_TRAFFIC_INTERVAL` | `100ms` | bandwidth limiter time slice |
 | `NORAY_UDP_RELAY_MAX_LIFETIME_DURATION` | `4hr` | block relays older than this |
 | `NORAY_UDP_RELAY_MAX_LIFETIME_TRAFFIC` | `4gb` | block relays after this many bytes |
+| `NORAY_UDP_RELAY_WAIT_FOR_PEER` | `false` | relay to an address only once it has sent to the sender's relay port (new, see below) |
 | `NORAY_LOGLEVEL` | `info` | `silent trace debug info warn error fatal` |
+
+`NORAY_UDP_RELAY_WAIT_FOR_PEER`: both sides of a relay start sending when Noray answers `connect-relay`. Some home routers block a remote endpoint for good once a packet from it arrives before they have sent to it, so if one side is late by more than the relay's one-way trip (a slow frame, a resent TCP reply), the early side's packets arrive first and that relay never carries anything either way. With this on, a packet is relayed to an address only once that address has sent to the sender's relay port; until then it is dropped (`noray_relay_held_count`). Every router then sees its own packet first. Protocols that resend their first packets (ENet does) lose nothing; a one-shot packet sent before the other side has spoken is lost, which is why it is off by default (the original relays at once).
 
 Sizes are bytes in powers of 1024 (`1Gb` = 1 GiB of bytes, not a gigabit); durations take `us ms s m h hr d w mo yr`. Logs are pino-style JSON lines on stdout.
 

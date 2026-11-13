@@ -46,6 +46,7 @@ type Config struct {
 		TrafficInterval      float64 `json:"trafficInterval"`
 		MaxLifetimeDuration  float64 `json:"maxLifetimeDuration"`
 		MaxLifetimeTraffic   float64 `json:"maxLifetimeTraffic"`
+		WaitForPeer          bool    `json:"waitForPeer"`
 	} `json:"udpRelay"`
 	LogLevel string `json:"loglevel"`
 }
@@ -151,6 +152,9 @@ func FromEnv(env Env) (*Config, error) {
 	}
 	if r.MaxLifetimeTraffic, err = sizeOf(env, "NORAY_UDP_RELAY_MAX_LIFETIME_TRAFFIC", "4gb"); err != nil {
 		return nil, err
+	}
+	if v, ok := Boolean(env("NORAY_UDP_RELAY_WAIT_FOR_PEER")); ok {
+		r.WaitForPeer = v
 	}
 
 	c.LogLevel = LogLevel(env)

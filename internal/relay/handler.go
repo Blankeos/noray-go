@@ -18,6 +18,7 @@ type Metrics struct {
 	Expired  *metrics.Counter    // noray_relay_expired
 	Blocked  *metrics.CounterVec // noray_relay_blocked_count{reason} (new)
 	SendErr  *metrics.Counter    // noray_relay_send_error_count (new)
+	Held     *metrics.Counter    // noray_relay_held_count (new, WaitForPeer)
 }
 
 // NewMetrics registers the relay metrics on r.
@@ -32,6 +33,8 @@ func NewMetrics(r *metrics.Registry) *Metrics {
 			"Number of relay packets blocked by a relay constraint (the original crashed instead)",
 			"reason", ReasonNames...),
 		SendErr: r.NewCounter("noray_relay_send_error_count", "Number of relay packets that failed to send"),
+		Held: r.NewCounter("noray_relay_held_count",
+			"Number of relay packets dropped because the target had not sent to the sender's relay yet (wait for peer)"),
 	}
 }
 
@@ -50,6 +53,7 @@ type Handler struct {
 	pool        *SocketPool
 	constraints []Constraint
 	dynamic     bool
+	waitForPeer bool
 	m           *Metrics
 	log         *logger.Logger
 	now         func() int64
@@ -87,6 +91,23 @@ func (h *Handler) AddConstraint(c Constraint) { h.constraints = append(h.constra
 // that sends to an existing relay port gets a relay of its own, and the
 // packet is forwarded.
 func (h *Handler) EnableDynamicRelaying() { h.dynamic = true }
+
+// EnableWaitForPeer makes the relay forward traffic to an address only once
+// that address has sent to the sender's relay port itself. Until then the
+// packet is dropped (and counted in noray_relay_held_count).
+//
+// Why: some NATs (seen on a Linux-based home router) break a mapping when a
+// packet from a remote endpoint arrives before the local side has sent to
+// it: the unsolicited packet is dropped, but the pair is then blocked, and
+// the local side's own packets to that endpoint leave from another public
+// port, which the relay doesn't know. Through a relay both sides start
+// sending when Noray answers `connect-relay`; if one side is late by more
+// than the relay's one-way trip (a slow frame, a retransmitted TCP reply),
+// the early side's packets reach it first and the relay never works for
+// that pair. Holding them until the late side has sent means every NAT sees
+// its own outbound packet first. ENet and other protocols resend their first
+// packets anyway, so only the early side's first packets are lost.
+func (h *Handler) EnableWaitForPeer() { h.waitForPeer = true }
 
 // CreateRelay returns the relay for addr, creating one on a free port if
 // there is none. created is false if it already existed.
@@ -192,6 +213,13 @@ func (h *Handler) Relay(msg []byte, sender netip.AddrPort, targetPort int) bool 
 	}
 	if src.sock == nil {
 		return false
+	}
+	if h.waitForPeer {
+		src.markSentTo(dst.Port)
+		if !dst.hasSentTo(src.Port) {
+			h.m.Held.Inc()
+			return false
+		}
 	}
 
 	now := h.now()

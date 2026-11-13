@@ -125,6 +125,10 @@ func (s *Server) Start() error {
 	s.Relays.AddConstraint(&relay.Traffic{Traffic: u.MaxLifetimeTraffic})
 	rlog.Info(nil, "Applying dynamic relaying")
 	s.Relays.EnableDynamicRelaying()
+	if u.WaitForPeer {
+		rlog.Info(nil, "Relaying to an address only once it has sent to the sender's relay")
+		s.Relays.EnableWaitForPeer()
+	}
 
 	// TCP
 	s.log.Info(nil, "Starting TCP server")
